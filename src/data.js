@@ -6,26 +6,25 @@
  * @fires QueryBuilder.changer:validateValue
  */
 QueryBuilder.prototype.validateValue = function(rule, value) {
-    var validation = rule.filter.validation || {};
-    var result = true;
+    const validation = rule.filter.validation || {};
+    let result = true;
 
     if (validation.callback) {
         result = validation.callback.call(this, value, rule);
-    }
-    else {
+    } else {
         result = this._validateValue(rule, value);
     }
 
-    /**
-     * Modifies the result of the rule validation method
-     * @event changer:validateValue
-     * @memberof QueryBuilder
-     * @param {array|boolean} result - true or an error array
-     * @param {*} value
-     * @param {Rule} rule
-     * @returns {array|boolean}
-     */
-    return this.change('validateValue', result, value, rule);
+    const event = new CustomEvent('validateValue', {
+        detail: { result, value, rule },
+        bubbles: true,
+        cancelable: true
+    });
+    this.element.dispatchEvent(event);
+    if (!event.defaultPrevented) {
+        result = event.detail.result;
+    }
+    return result;
 };
 
 /**
@@ -37,214 +36,123 @@ QueryBuilder.prototype.validateValue = function(rule, value) {
  * @private
  */
 QueryBuilder.prototype._validateValue = function(rule, value) {
-    var filter = rule.filter;
-    var operator = rule.operator;
-    var validation = filter.validation || {};
-    var result = true;
-    var tmp, tempValue;
+    const filter = rule.filter;
+    const operator = rule.operator;
+    const validation = filter.validation || {};
+    let result = true;
 
-    if (rule.operator.nb_inputs === 1) {
+    // Handle the case where only one input is expected
+    if (operator.nb_inputs === 1) {
         value = [value];
     }
 
-    for (var i = 0; i < operator.nb_inputs; i++) {
-        if (!operator.multiple && $.isArray(value[i]) && value[i].length > 1) {
-            result = ['operator_not_multiple', operator.type, this.translate('operators', operator.type)];
-            break;
+    for (let i = 0; i < operator.nb_inputs; i++) {
+        // Check if the operator allows multiple values
+        if (!operator.multiple && Array.isArray(value[i]) && value[i].length > 1) {
+            return ['operator_not_multiple', operator.type, this.translate('operators', operator.type)];
         }
 
+        let tempValue = Array.isArray(value[i]) ? value[i] : [value[i]];
+
+        // Validation based on the input type
         switch (filter.input) {
             case 'radio':
-                if (value[i] === undefined || value[i].length === 0) {
-                    if (!validation.allow_empty_value) {
-                        result = ['radio_empty'];
-                    }
-                    break;
-                }
-                break;
-
             case 'checkbox':
-                if (value[i] === undefined || value[i].length === 0) {
-                    if (!validation.allow_empty_value) {
-                        result = ['checkbox_empty'];
-                    }
-                    break;
-                }
-                break;
-
             case 'select':
                 if (value[i] === undefined || value[i].length === 0 || (filter.placeholder && value[i] == filter.placeholder_value)) {
                     if (!validation.allow_empty_value) {
-                        result = ['select_empty'];
+                        return [`${filter.input}_empty`];
                     }
-                    break;
                 }
                 break;
 
             default:
-                tempValue = $.isArray(value[i]) ? value[i] : [value[i]];
-
-                for (var j = 0; j < tempValue.length; j++) {
-                    switch (QueryBuilder.types[filter.type]) {
-                        case 'string':
-                            if (tempValue[j] === undefined || tempValue[j].length === 0) {
-                                if (!validation.allow_empty_value) {
-                                    result = ['string_empty'];
-                                }
-                                break;
-                            }
-                            if (validation.min !== undefined) {
-                                if (tempValue[j].length < parseInt(validation.min)) {
-                                    result = [this.getValidationMessage(validation, 'min', 'string_exceed_min_length'), validation.min];
-                                    break;
-                                }
-                            }
-                            if (validation.max !== undefined) {
-                                if (tempValue[j].length > parseInt(validation.max)) {
-                                    result = [this.getValidationMessage(validation, 'max', 'string_exceed_max_length'), validation.max];
-                                    break;
-                                }
-                            }
-                            if (validation.format) {
-                                if (typeof validation.format == 'string') {
-                                    validation.format = new RegExp(validation.format);
-                                }
-                                if (!validation.format.test(tempValue[j])) {
-                                    result = [this.getValidationMessage(validation, 'format', 'string_invalid_format'), validation.format];
-                                    break;
-                                }
-                            }
-                            break;
-
-                        case 'number':
-                            if (tempValue[j] === undefined || tempValue[j].length === 0) {
-                                if (!validation.allow_empty_value) {
-                                    result = ['number_nan'];
-                                }
-                                break;
-                            }
-                            if (isNaN(tempValue[j])) {
-                                result = ['number_nan'];
-                                break;
-                            }
-                            if (filter.type == 'integer') {
-                                if (parseInt(tempValue[j]) != tempValue[j]) {
-                                    result = ['number_not_integer'];
-                                    break;
-                                }
-                            }
-                            else {
-                                if (parseFloat(tempValue[j]) != tempValue[j]) {
-                                    result = ['number_not_double'];
-                                    break;
-                                }
-                            }
-                            if (validation.min !== undefined) {
-                                if (tempValue[j] < parseFloat(validation.min)) {
-                                    result = [this.getValidationMessage(validation, 'min', 'number_exceed_min'), validation.min];
-                                    break;
-                                }
-                            }
-                            if (validation.max !== undefined) {
-                                if (tempValue[j] > parseFloat(validation.max)) {
-                                    result = [this.getValidationMessage(validation, 'max', 'number_exceed_max'), validation.max];
-                                    break;
-                                }
-                            }
-                            if (validation.step !== undefined && validation.step !== 'any') {
-                                var v = (tempValue[j] / validation.step).toPrecision(14);
-                                if (parseInt(v) != v) {
-                                    result = [this.getValidationMessage(validation, 'step', 'number_wrong_step'), validation.step];
-                                    break;
-                                }
-                            }
-                            break;
-
-                        case 'datetime':
-                            if (tempValue[j] === undefined || tempValue[j].length === 0) {
-                                if (!validation.allow_empty_value) {
-                                    result = ['datetime_empty'];
-                                }
-                                break;
-                            }
-
-                            // we need MomentJS
-                            if (validation.format) {
-                                if (!('moment' in window)) {
-                                    Utils.error('MissingLibrary', 'MomentJS is required for Date/Time validation. Get it here http://momentjs.com');
-                                }
-
-                                var datetime = moment(tempValue[j], validation.format);
-                                if (!datetime.isValid()) {
-                                    result = [this.getValidationMessage(validation, 'format', 'datetime_invalid'), validation.format];
-                                    break;
-                                }
-                                else {
-                                    if (validation.min) {
-                                        if (datetime < moment(validation.min, validation.format)) {
-                                            result = [this.getValidationMessage(validation, 'min', 'datetime_exceed_min'), validation.min];
-                                            break;
-                                        }
-                                    }
-                                    if (validation.max) {
-                                        if (datetime > moment(validation.max, validation.format)) {
-                                            result = [this.getValidationMessage(validation, 'max', 'datetime_exceed_max'), validation.max];
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            break;
-
-                        case 'boolean':
-                            if (tempValue[j] === undefined || tempValue[j].length === 0) {
-                                if (!validation.allow_empty_value) {
-                                    result = ['boolean_not_valid'];
-                                }
-                                break;
-                            }
-                            tmp = ('' + tempValue[j]).trim().toLowerCase();
-                            if (tmp !== 'true' && tmp !== 'false' && tmp !== '1' && tmp !== '0' && tempValue[j] !== 1 && tempValue[j] !== 0) {
-                                result = ['boolean_not_valid'];
-                                break;
-                            }
-                    }
-
-                    if (result !== true) {
-                        break;
+                for (let val of tempValue) {
+                    if (val === undefined || val.length === 0) {
+                        if (!validation.allow_empty_value) {
+                            return [`${filter.input}_empty`];
+                        }
+                    } else {
+                        // Further validation based on the filter type
+                        result = this.validateByType(filter, val, validation);
+                        if (result !== true) return result;
                     }
                 }
         }
+    }
 
-        if (result !== true) {
+    // Special validation for 'between' and 'not_between' operators
+    if ((operator.type === 'between' || operator.type === 'not_between') && value.length === 2) {
+        if (['number', 'datetime'].includes(QueryBuilder.types[filter.type])) {
+            const isInvalidRange = (QueryBuilder.types[filter.type] === 'number' && value[0] > value[1]) ||
+                (QueryBuilder.types[filter.type] === 'datetime' && moment(value[0], validation.format).isAfter(moment(value[1], validation.format)));
+            if (isInvalidRange) {
+                return [`${filter.type}_between_invalid`, value[0], value[1]];
+            }
+        }
+    }
+
+    return true;
+};
+
+/**
+ * Validates a single value based on the specified filter type and its validation rules.
+ * This function supports extended validation for string, number, datetime, and boolean types.
+ *
+ * @param {object} filter - The filter object associated with the rule, containing type and validation settings.
+ * @param {*} value - The value to validate.
+ * @param {object} validation - The validation rules derived from the filter configuration.
+ * @returns {array|boolean} - Returns true if the value passes all validation rules, otherwise returns an error array.
+ */
+QueryBuilder.prototype.validateByType = function(filter, value, validation) {
+    switch (QueryBuilder.types[filter.type]) {
+        case 'string':
+            if (validation.min !== undefined && value.length < validation.min) {
+                return ['string_exceed_min_length', validation.min];
+            }
+            if (validation.max !== undefined && value.length > validation.max) {
+                return ['string_exceed_max_length', validation.max];
+            }
+            if (validation.format && !new RegExp(validation.format).test(value)) {
+                return ['string_invalid_format', validation.format];
+            }
             break;
-        }
+
+        case 'number':
+            const numValue = parseFloat(value);
+            if (isNaN(numValue)) return ['number_nan'];
+            if ((filter.type === 'integer' && parseInt(value) !== numValue) || (filter.type !== 'integer' && numValue !== parseFloat(value))) {
+                return ['number_not_double'];
+            }
+            if (validation.min !== undefined && numValue < validation.min) {
+                return ['number_exceed_min', validation.min];
+            }
+            if (validation.max !== undefined && numValue > validation.max) {
+                return ['number_exceed_max', validation.max];
+            }
+            break;
+
+        case 'datetime':
+            const datetime = moment(value, validation.format);
+            if (!datetime.isValid()) {
+                return ['datetime_invalid', validation.format];
+            }
+            if (validation.min && datetime.isBefore(moment(validation.min, validation.format))) {
+                return ['datetime_exceed_min', validation.min];
+            }
+            if (validation.max && datetime.isAfter(moment(validation.max, validation.format))) {
+                return ['datetime_exceed_max', validation.max];
+            }
+            break;
+
+        case 'boolean':
+            const boolValue = value.trim().toLowerCase();
+            if (!['true', 'false', '1', '0'].includes(boolValue)) {
+                return ['boolean_not_valid'];
+            }
+            break;
     }
-
-    if ((rule.operator.type === 'between' || rule.operator.type === 'not_between') && value.length === 2) {
-        switch (QueryBuilder.types[filter.type]) {
-            case 'number':
-                if (value[0] > value[1]) {
-                    result = ['number_between_invalid', value[0], value[1]];
-                }
-                break;
-
-            case 'datetime':
-                // we need MomentJS
-                if (validation.format) {
-                    if (!('moment' in window)) {
-                        Utils.error('MissingLibrary', 'MomentJS is required for Date/Time validation. Get it here http://momentjs.com');
-                    }
-
-                    if (moment(value[0], validation.format).isAfter(moment(value[1], validation.format))) {
-                        result = ['datetime_between_invalid', value[0], value[1]];
-                    }
-                }
-                break;
-        }
-    }
-
-    return result;
+    return true;
 };
 
 /**
@@ -271,43 +179,35 @@ QueryBuilder.prototype.nextRuleId = function() {
  * @returns {object[]}
  * @fires QueryBuilder.changer:getOperators
  */
+
 QueryBuilder.prototype.getOperators = function(filter) {
-    if (typeof filter == 'string') {
-        filter = this.getFilterById(filter);
+    if (typeof filter === 'string') {
+        filter = this.getFilterById(filter); // Assume getFilterById is already converted to vanilla JS
     }
 
-    var result = [];
+    let result = [];
 
-    for (var i = 0, l = this.operators.length; i < l; i++) {
-        // filter operators check
+    for (let i = 0, l = this.operators.length; i < l; i++) {
         if (filter.operators) {
-            if (filter.operators.indexOf(this.operators[i].type) == -1) {
+            // If specific operators are defined for the filter, use them
+            if (!filter.operators.includes(this.operators[i].type)) {
                 continue;
             }
-        }
-        // type check
-        else if (this.operators[i].apply_to.indexOf(QueryBuilder.types[filter.type]) == -1) {
-            continue;
+        } else {
+            // If no specific operators are defined, filter by the type applicable to the filter
+            if (!this.operators[i].apply_to.includes(QueryBuilder.types[filter.type])) {
+                continue;
+            }
         }
 
         result.push(this.operators[i]);
     }
 
-    // keep sort order defined for the filter
+    // Maintain the sort order as defined for the filter
     if (filter.operators) {
-        result.sort(function(a, b) {
-            return filter.operators.indexOf(a.type) - filter.operators.indexOf(b.type);
-        });
+        result.sort((a, b) => filter.operators.indexOf(a.type) - filter.operators.indexOf(b.type));
     }
 
-    /**
-     * Modifies the operators available for a filter
-     * @event changer:getOperators
-     * @memberof QueryBuilder
-     * @param {QueryBuilder.Operator[]} operators
-     * @param {QueryBuilder.Filter} filter
-     * @returns {QueryBuilder.Operator[]}
-     */
     return this.change('getOperators', result, filter);
 };
 
@@ -318,18 +218,20 @@ QueryBuilder.prototype.getOperators = function(filter) {
  * @returns {object|null}
  * @throws UndefinedFilterError
  */
-QueryBuilder.prototype.getFilterById = function(id, doThrow) {
-    if (id == '-1') {
+QueryBuilder.prototype.getFilterById = function(id, doThrow = true) {
+    if (id === '-1') {
         return null;
     }
 
-    for (var i = 0, l = this.filters.length; i < l; i++) {
-        if (this.filters[i].id == id) {
+    for (let i = 0, l = this.filters.length; i < l; i++) {
+        if (this.filters[i].id === id) {
             return this.filters[i];
         }
     }
 
-    Utils.error(doThrow !== false, 'UndefinedFilter', 'Undefined filter "{0}"', id);
+    if (doThrow) {
+        throw new Error(`Undefined filter "${id}"`);
+    }
 
     return null;
 };
@@ -341,21 +243,24 @@ QueryBuilder.prototype.getFilterById = function(id, doThrow) {
  * @returns {object|null}
  * @throws UndefinedOperatorError
  */
-QueryBuilder.prototype.getOperatorByType = function(type, doThrow) {
-    if (type == '-1') {
+QueryBuilder.prototype.getOperatorByType = function(type, doThrow = true) {
+    if (type === '-1') {
         return null;
     }
 
-    for (var i = 0, l = this.operators.length; i < l; i++) {
-        if (this.operators[i].type == type) {
+    for (let i = 0, l = this.operators.length; i < l; i++) {
+        if (this.operators[i].type === type) {
             return this.operators[i];
         }
     }
 
-    Utils.error(doThrow !== false, 'UndefinedOperator', 'Undefined operator "{0}"', type);
+    if (doThrow) {
+        throw new Error(`Undefined operator "${type}"`);
+    }
 
     return null;
 };
+
 
 /**
  * Returns rule's current input value
@@ -364,63 +269,63 @@ QueryBuilder.prototype.getOperatorByType = function(type, doThrow) {
  * @fires QueryBuilder.changer:getRuleValue
  * @private
  */
+/**
+ * Returns rule's current input value
+ * @param {Rule} rule
+ * @returns {*}
+ * @fires QueryBuilder.changer:getRuleValue
+ * @private
+ */
 QueryBuilder.prototype.getRuleInputValue = function(rule) {
-    var filter = rule.filter;
-    var operator = rule.operator;
-    var value = [];
+    let filter = rule.filter;
+    let operator = rule.operator;
+    let value = [];
 
     if (filter.valueGetter) {
         value = filter.valueGetter.call(this, rule);
-    }
-    else {
-        var $value = rule.$el.find(QueryBuilder.selectors.value_container);
+    } else {
+        let valueContainer = rule.$el.querySelector(QueryBuilder.selectors.value_container);
 
-        for (var i = 0; i < operator.nb_inputs; i++) {
-            var name = Utils.escapeElementId(rule.id + '_value_' + i);
-            var tmp;
+        for (let i = 0; i < operator.nb_inputs; i++) {
+            let name = Utils.escapeElementId(rule.id + '_value_' + i);
+            let inputs, tmp;
 
             switch (filter.input) {
                 case 'radio':
-                    value.push($value.find('[name=' + name + ']:checked').val());
+                    inputs = valueContainer.querySelector(`[name="${name}"]:checked`);
+                    value.push(inputs ? inputs.value : undefined);
                     break;
 
                 case 'checkbox':
-                    tmp = [];
-                    $value.find('[name=' + name + ']:checked').each(function() {
-                        tmp.push($(this).val());
-                    });
+                    tmp = Array.from(valueContainer.querySelectorAll(`[name="${name}"]:checked`))
+                        .map(input => input.value);
                     value.push(tmp);
                     break;
 
                 case 'select':
+                    inputs = Array.from(valueContainer.querySelectorAll(`[name="${name}"] option:selected`));
                     if (filter.multiple) {
-                        tmp = [];
-                        $value.find('[name=' + name + '] option:selected').each(function() {
-                            tmp.push($(this).val());
-                        });
+                        tmp = inputs.map(option => option.value);
                         value.push(tmp);
-                    }
-                    else {
-                        value.push($value.find('[name=' + name + '] option:selected').val());
+                    } else {
+                        value.push(inputs.length > 0 ? inputs[0].value : undefined);
                     }
                     break;
 
                 default:
-                    value.push($value.find('[name=' + name + ']').val());
+                    inputs = valueContainer.querySelector(`[name="${name}"]`);
+                    value.push(inputs ? inputs.value : undefined);
             }
         }
 
-        value = value.map(function(val) {
-            if (operator.multiple && filter.value_separator && typeof val == 'string') {
+        value = value.map(val => {
+            if (operator.multiple && filter.value_separator && typeof val === 'string') {
                 val = val.split(filter.value_separator);
             }
 
-            if ($.isArray(val)) {
-                return val.map(function(subval) {
-                    return Utils.changeType(subval, filter.type);
-                });
-            }
-            else {
+            if (Array.isArray(val)) {
+                return val.map(subval => Utils.changeType(subval, filter.type));
+            } else {
                 return Utils.changeType(val, filter.type);
             }
         });
@@ -446,6 +351,13 @@ QueryBuilder.prototype.getRuleInputValue = function(rule) {
     return this.change('getRuleValue', value, rule);
 };
 
+
+/**
+ * Sets the value of a rule's input
+ * @param {Rule} rule
+ * @param {*} value
+ * @private
+ */
 /**
  * Sets the value of a rule's input
  * @param {Rule} rule
@@ -453,8 +365,8 @@ QueryBuilder.prototype.getRuleInputValue = function(rule) {
  * @private
  */
 QueryBuilder.prototype.setRuleInputValue = function(rule, value) {
-    var filter = rule.filter;
-    var operator = rule.operator;
+    let filter = rule.filter;
+    let operator = rule.operator;
 
     if (!filter || !operator) {
         return;
@@ -464,36 +376,49 @@ QueryBuilder.prototype.setRuleInputValue = function(rule, value) {
 
     if (filter.valueSetter) {
         filter.valueSetter.call(this, rule, value);
-    }
-    else {
-        var $value = rule.$el.find(QueryBuilder.selectors.value_container);
+    } else {
+        let valueContainer = rule.$el.querySelector(QueryBuilder.selectors.value_container);
 
-        if (operator.nb_inputs == 1) {
+        if (operator.nb_inputs === 1) {
             value = [value];
         }
 
-        for (var i = 0; i < operator.nb_inputs; i++) {
-            var name = Utils.escapeElementId(rule.id + '_value_' + i);
+        for (let i = 0; i < operator.nb_inputs; i++) {
+            let name = Utils.escapeElementId(rule.id + '_value_' + i);
+            let inputs;
 
             switch (filter.input) {
                 case 'radio':
-                    $value.find('[name=' + name + '][value="' + value[i] + '"]').prop('checked', true).trigger('change');
+                    inputs = valueContainer.querySelectorAll(`[name="${name}"]`);
+                    inputs.forEach(input => {
+                        if (input.value === value[i]) {
+                            input.checked = true;
+                            input.dispatchEvent(new Event('change'));
+                        }
+                    });
                     break;
 
                 case 'checkbox':
-                    if (!$.isArray(value[i])) {
+                    if (!Array.isArray(value[i])) {
                         value[i] = [value[i]];
                     }
-                    value[i].forEach(function(value) {
-                        $value.find('[name=' + name + '][value="' + value + '"]').prop('checked', true).trigger('change');
+                    value[i].forEach(val => {
+                        let checkbox = valueContainer.querySelector(`[name="${name}"][value="${val}"]`);
+                        if (checkbox) {
+                            checkbox.checked = true;
+                            checkbox.dispatchEvent(new Event('change'));
+                        }
                     });
                     break;
 
                 default:
-                    if (operator.multiple && filter.value_separator && $.isArray(value[i])) {
-                        value[i] = value[i].join(filter.value_separator);
+                    let inputElement = valueContainer.querySelector(`[name="${name}"]`);
+                    if (operator.multiple && filter.value_separator && Array.isArray(value[i])) {
+                        inputElement.value = value[i].join(filter.value_separator);
+                    } else {
+                        inputElement.value = value[i];
                     }
-                    $value.find('[name=' + name + ']').val(value[i]).trigger('change');
+                    inputElement.dispatchEvent(new Event('change'));
                     break;
             }
         }
@@ -510,19 +435,20 @@ QueryBuilder.prototype.setRuleInputValue = function(rule, value) {
  * @private
  */
 QueryBuilder.prototype.parseRuleFlags = function(rule) {
-    var flags = $.extend({}, this.settings.default_rule_flags);
+    let flags = { ...this.settings.default_rule_flags };
 
     if (rule.readonly) {
-        $.extend(flags, {
+        flags = {
+            ...flags,
             filter_readonly: true,
             operator_readonly: true,
             value_readonly: true,
             no_delete: true
-        });
+        };
     }
 
     if (rule.flags) {
-        $.extend(flags, rule.flags);
+        flags = { ...flags, ...rule.flags };
     }
 
     /**
@@ -545,12 +471,11 @@ QueryBuilder.prototype.parseRuleFlags = function(rule) {
  */
 QueryBuilder.prototype.getRuleFlags = function(flags, all) {
     if (all) {
-        return $.extend({}, flags);
-    }
-    else {
-        var ret = {};
-        $.each(this.settings.default_rule_flags, function(key, value) {
-            if (flags[key] !== value) {
+        return { ...flags };
+    } else {
+        let ret = {};
+        Object.keys(this.settings.default_rule_flags).forEach(key => {
+            if (flags[key] !== this.settings.default_rule_flags[key]) {
                 ret[key] = flags[key];
             }
         });
@@ -566,19 +491,20 @@ QueryBuilder.prototype.getRuleFlags = function(flags, all) {
  * @private
  */
 QueryBuilder.prototype.parseGroupFlags = function(group) {
-    var flags = $.extend({}, this.settings.default_group_flags);
+    let flags = { ...this.settings.default_group_flags };
 
     if (group.readonly) {
-        $.extend(flags, {
+        flags = {
+            ...flags,
             condition_readonly: true,
             no_add_rule: true,
             no_add_group: true,
             no_delete: true
-        });
+        };
     }
 
     if (group.flags) {
-        $.extend(flags, group.flags);
+        flags = { ...flags, ...group.flags };
     }
 
     /**
@@ -601,18 +527,18 @@ QueryBuilder.prototype.parseGroupFlags = function(group) {
  */
 QueryBuilder.prototype.getGroupFlags = function(flags, all) {
     if (all) {
-        return $.extend({}, flags);
-    }
-    else {
-        var ret = {};
-        $.each(this.settings.default_group_flags, function(key, value) {
-            if (flags[key] !== value) {
+        return { ...flags };
+    } else {
+        const ret = {};
+        Object.keys(this.settings.default_group_flags).forEach(key => {
+            if (flags[key] !== this.settings.default_group_flags[key]) {
                 ret[key] = flags[key];
             }
         });
         return ret;
     }
 };
+
 
 /**
  * Translate a label either by looking in the `lang` object or in itself if it's an object where keys are language codes
@@ -627,11 +553,10 @@ QueryBuilder.prototype.translate = function(category, key) {
         category = undefined;
     }
 
-    var translation;
+    let translation;
     if (typeof key === 'object') {
         translation = key[this.settings.lang_code] || key['en'];
-    }
-    else {
+    } else {
         translation = (category ? this.lang[category] : this.lang)[key] || key;
     }
 
@@ -647,6 +572,7 @@ QueryBuilder.prototype.translate = function(category, key) {
     return this.change('translate', translation, key, category);
 };
 
+
 /**
  * Returns a validation message
  * @param {object} validation
@@ -658,3 +584,4 @@ QueryBuilder.prototype.translate = function(category, key) {
 QueryBuilder.prototype.getValidationMessage = function(validation, type, def) {
     return validation.messages && validation.messages[type] || def;
 };
+

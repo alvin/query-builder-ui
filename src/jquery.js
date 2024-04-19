@@ -1,77 +1,34 @@
-/**
- * The {@link http://learn.jquery.com/plugins/|jQuery Plugins} namespace
- * @external "jQuery.fn"
- */
+class QueryBuilderManager {
+    constructor(selector, option, ...args) {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(element => {
+            let instance = element.__queryBuilderInstance__;
+            if (!instance && option !== 'destroy') {
+                instance = new QueryBuilder(element, typeof option === 'object' ? option : undefined);
+                element.__queryBuilderInstance__ = instance;
+                if (typeof option === 'object' && option.rules) {
+                    instance.init(option.rules);
+                }
+            } else if (instance && typeof option === 'string') {
+                if (option === 'destroy') {
+                    instance.destroy();
+                    delete element.__queryBuilderInstance__;
+                } else if (typeof instance[option] === 'function') {
+                    return instance[option].apply(instance, args);
+                }
+            }
+        });
 
-/**
- * Instanciates or accesses the {@link QueryBuilder} on an element
- * @function
- * @memberof external:"jQuery.fn"
- * @param {*} option - initial configuration or method name
- * @param {...*} args - method arguments
- *
- * @example
- * $('#builder').queryBuilder({ /** configuration object *\/ });
- * @example
- * $('#builder').queryBuilder('methodName', methodParam1, methodParam2);
- */
-$.fn.queryBuilder = function(option) {
-    if (this.length === 0) {
-        Utils.error('Config', 'No target defined');
+        return elements.length === 1 ? elements[0] : Array.from(elements);
     }
-    if (this.length > 1) {
-        Utils.error('Config', 'Unable to initialize on multiple target');
-    }
+}
 
-    var data = this.data('queryBuilder');
-    var options = (typeof option == 'object' && option) || {};
+// Static methods to handle global settings or utilities
+QueryBuilderManager.defaults = QueryBuilder.defaults;
+QueryBuilderManager.extend = QueryBuilder.extend;
+QueryBuilderManager.define = QueryBuilder.define;
+QueryBuilderManager.regional = QueryBuilder.regional;
 
-    if (!data && option == 'destroy') {
-        return this;
-    }
-    if (!data) {
-        var builder = new QueryBuilder(this, options);
-        this.data('queryBuilder', builder);
-        builder.init(options.rules);
-    }
-    if (typeof option == 'string') {
-        return data[option].apply(data, Array.prototype.slice.call(arguments, 1));
-    }
-
-    return this;
-};
-
-/**
- * @function
- * @memberof external:"jQuery.fn"
- * @see QueryBuilder
- */
-$.fn.queryBuilder.constructor = QueryBuilder;
-
-/**
- * @function
- * @memberof external:"jQuery.fn"
- * @see QueryBuilder.defaults
- */
-$.fn.queryBuilder.defaults = QueryBuilder.defaults;
-
-/**
- * @function
- * @memberof external:"jQuery.fn"
- * @see QueryBuilder.defaults
- */
-$.fn.queryBuilder.extend = QueryBuilder.extend;
-
-/**
- * @function
- * @memberof external:"jQuery.fn"
- * @see QueryBuilder.define
- */
-$.fn.queryBuilder.define = QueryBuilder.define;
-
-/**
- * @function
- * @memberof external:"jQuery.fn"
- * @see QueryBuilder.regional
- */
-$.fn.queryBuilder.regional = QueryBuilder.regional;
+// Usage example
+const queryBuilder = new QueryBuilderManager('#builder', { /* configuration object */ });
+queryBuilder.queryBuilder('methodName', methodParam1, methodParam2);

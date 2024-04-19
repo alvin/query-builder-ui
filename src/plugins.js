@@ -1,114 +1,49 @@
-/**
- * @module plugins
- */
-
-/**
- * Definition of available plugins
- * @type {object.<String, object>}
- */
+// Establishing a basic namespace for QueryBuilder if it doesn't exist
+window.QueryBuilder = window.QueryBuilder || {};
 QueryBuilder.plugins = {};
 
-/**
- * Gets or extends the default configuration
- * @param {object} [options] - new configuration
- * @returns {undefined|object} nothing or configuration object (copy)
- */
-QueryBuilder.defaults = function(options) {
-    if (typeof options == 'object') {
-        $.extendext(true, 'replace', QueryBuilder.DEFAULTS, options);
+class QueryBuilderBase {
+    constructor() {
+        this.plugins = {};
+        this.DEFAULTS = {};  // This should be defined based on your default settings
     }
-    else if (typeof options == 'string') {
-        if (typeof QueryBuilder.DEFAULTS[options] == 'object') {
-            return $.extend(true, {}, QueryBuilder.DEFAULTS[options]);
-        }
-        else {
-            return QueryBuilder.DEFAULTS[options];
+
+    static defaults(options) {
+        if (typeof options === 'object') {
+            Object.assign(QueryBuilderBase.prototype.DEFAULTS, options);
+        } else if (typeof options === 'string') {
+            return {...QueryBuilderBase.prototype.DEFAULTS[options]};
+        } else {
+            return {...QueryBuilderBase.prototype.DEFAULTS};
         }
     }
-    else {
-        return $.extend(true, {}, QueryBuilder.DEFAULTS);
-    }
-};
 
-/**
- * Registers a new plugin
- * @param {string} name
- * @param {function} fct - init function
- * @param {object} [def] - default options
- */
-QueryBuilder.define = function(name, fct, def) {
-    QueryBuilder.plugins[name] = {
-        fct: fct,
-        def: def || {}
-    };
-};
-
-/**
- * Adds new methods to QueryBuilder prototype
- * @param {object.<string, function>} methods
- */
-QueryBuilder.extend = function(methods) {
-    $.extend(QueryBuilder.prototype, methods);
-};
-
-/**
- * Initializes plugins for an instance
- * @throws ConfigError
- * @private
- */
-QueryBuilder.prototype.initPlugins = function() {
-    if (!this.plugins) {
-        return;
+    static define(name, fct, def = {}) {
+        QueryBuilder.plugins[name] = { init: fct, defaults: def };
     }
 
-    if ($.isArray(this.plugins)) {
-        var tmp = {};
-        this.plugins.forEach(function(plugin) {
-            tmp[plugin] = null;
+    static extend(methods) {
+        Object.assign(QueryBuilderBase.prototype, methods);
+    }
+
+    initPlugins() {
+        Object.keys(this.plugins).forEach(pluginName => {
+            const plugin = QueryBuilder.plugins[pluginName];
+            if (plugin) {
+                const opts = {...plugin.defaults, ...this.plugins[pluginName]};
+                plugin.init.call(this, opts);
+                this.plugins[pluginName] = opts;
+            } else {
+                throw new Error(`Plugin ${pluginName} not found`);
+            }
         });
-        this.plugins = tmp;
     }
 
-    Object.keys(this.plugins).forEach(function(plugin) {
-        if (plugin in QueryBuilder.plugins) {
-            this.plugins[plugin] = $.extend(true, {},
-                QueryBuilder.plugins[plugin].def,
-                this.plugins[plugin] || {}
-            );
-
-            QueryBuilder.plugins[plugin].fct.call(this, this.plugins[plugin]);
+    getPluginOptions(name, property) {
+        const plugin = this.plugins[name] || QueryBuilder.plugins[name]?.defaults;
+        if (!plugin) {
+            throw new Error(`Plugin ${name} not found`);
         }
-        else {
-            Utils.error('Config', 'Unable to find plugin "{0}"', plugin);
-        }
-    }, this);
-};
-
-/**
- * Returns the config of a plugin, if the plugin is not loaded, returns the default config.
- * @param {string} name
- * @param {string} [property]
- * @throws ConfigError
- * @returns {*}
- */
-QueryBuilder.prototype.getPluginOptions = function(name, property) {
-    var plugin;
-    if (this.plugins && this.plugins[name]) {
-        plugin = this.plugins[name];
+        return property ? plugin[property] : plugin;
     }
-    else if (QueryBuilder.plugins[name]) {
-        plugin = QueryBuilder.plugins[name].def;
-    }
-
-    if (plugin) {
-        if (property) {
-            return plugin[property];
-        }
-        else {
-            return plugin;
-        }
-    }
-    else {
-        Utils.error('Config', 'Unable to find plugin "{0}"', name);
-    }
-};
+}

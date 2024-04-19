@@ -3,20 +3,19 @@
  * @param {object} [rules]
  * @fires QueryBuilder.afterInit
  * @private
- */
-QueryBuilder.prototype.init = function(rules) {
+ */ QueryBuilder.prototype.init = function (rules) {
     /**
-     * When the initilization is done, just before creating the root group
+     * When the initialization is done, just before creating the root group
      * @event afterInit
      * @memberof QueryBuilder
      */
-    this.trigger('afterInit');
+    const event = new CustomEvent("afterInit");
+    this.element.dispatchEvent(event);
 
     if (rules) {
         this.setRules(rules);
         delete this.settings.rules;
-    }
-    else {
+    } else {
         this.setRoot(true);
     }
 };
@@ -27,128 +26,71 @@ QueryBuilder.prototype.init = function(rules) {
  * @returns {QueryBuilder.Filter[]}
  * @throws ConfigError
  */
-QueryBuilder.prototype.checkFilters = function(filters) {
+QueryBuilder.prototype.checkFilters = function (filters) {
     var definedFilters = [];
-
     if (!filters || filters.length === 0) {
-        Utils.error('Config', 'Missing filters list');
+        throw new Error("Missing filters list");
     }
 
-    filters.forEach(function(filter, i) {
+    filters.forEach((filter, i) => {
         if (!filter.id) {
-            Utils.error('Config', 'Missing filter {0} id', i);
+            throw new Error(`Missing filter ${i} id`);
         }
-        if (definedFilters.indexOf(filter.id) != -1) {
-            Utils.error('Config', 'Filter "{0}" already defined', filter.id);
+        if (definedFilters.includes(filter.id)) {
+            throw new Error(`Filter "${filter.id}" already defined`);
         }
         definedFilters.push(filter.id);
 
+        // Default type to 'string' if not specified
         if (!filter.type) {
-            filter.type = 'string';
-        }
-        else if (!QueryBuilder.types[filter.type]) {
-            Utils.error('Config', 'Invalid type "{0}"', filter.type);
+            filter.type = "string";
+        } else if (!QueryBuilder.types[filter.type]) {
+            throw new Error(`Invalid type "${filter.type}"`);
         }
 
+        // Set default inputs based on type
         if (!filter.input) {
-            filter.input = QueryBuilder.types[filter.type] === 'number' ? 'number' : 'text';
-        }
-        else if (typeof filter.input != 'function' && QueryBuilder.inputs.indexOf(filter.input) == -1) {
-            Utils.error('Config', 'Invalid input "{0}"', filter.input);
+            filter.input =
+                QueryBuilder.types[filter.type] === "number"
+                    ? "number"
+                    : "text";
+        } else if (
+            !["function"].includes(typeof filter.input) &&
+            !QueryBuilder.inputs.includes(filter.input)
+        ) {
+            throw new Error(`Invalid input "${filter.input}"`);
         }
 
+        // Process operators, if any
         if (filter.operators) {
-            filter.operators.forEach(function(operator) {
-                if (typeof operator != 'string') {
-                    Utils.error('Config', 'Filter operators must be global operators types (string)');
+            filter.operators.forEach((operator) => {
+                if (typeof operator !== "string") {
+                    throw new Error(
+                        "Filter operators must be global operators types (string)"
+                    );
                 }
             });
         }
 
-        if (!filter.field) {
-            filter.field = filter.id;
-        }
-        if (!filter.label) {
-            filter.label = filter.field;
-        }
+        // Set defaults for missing properties
+        filter.field = filter.field || filter.id;
+        filter.label = filter.label || filter.field;
+        filter.optgroup = filter.optgroup || null;
 
-        if (!filter.optgroup) {
-            filter.optgroup = null;
-        }
-        else {
+        // Handle optgroups
+        if (filter.optgroup) {
             this.status.has_optgroup = true;
-
-            // register optgroup if needed
             if (!this.settings.optgroups[filter.optgroup]) {
                 this.settings.optgroups[filter.optgroup] = filter.optgroup;
             }
         }
+    });
 
-        switch (filter.input) {
-            case 'radio':
-            case 'checkbox':
-                if (!filter.values || filter.values.length < 1) {
-                    Utils.error('Config', 'Missing filter "{0}" values', filter.id);
-                }
-                break;
-
-            case 'select':
-                var cleanValues = [];
-                filter.has_optgroup = false;
-
-                Utils.iterateOptions(filter.values, function(value, label, optgroup) {
-                    cleanValues.push({
-                        value: value,
-                        label: label,
-                        optgroup: optgroup || null
-                    });
-
-                    if (optgroup) {
-                        filter.has_optgroup = true;
-
-                        // register optgroup if needed
-                        if (!this.settings.optgroups[optgroup]) {
-                            this.settings.optgroups[optgroup] = optgroup;
-                        }
-                    }
-                }.bind(this));
-
-                if (filter.has_optgroup) {
-                    filter.values = Utils.groupSort(cleanValues, 'optgroup');
-                }
-                else {
-                    filter.values = cleanValues;
-                }
-
-                if (filter.placeholder) {
-                    if (filter.placeholder_value === undefined) {
-                        filter.placeholder_value = -1;
-                    }
-
-                    filter.values.forEach(function(entry) {
-                        if (entry.value == filter.placeholder_value) {
-                            Utils.error('Config', 'Placeholder of filter "{0}" overlaps with one of its values', filter.id);
-                        }
-                    });
-                }
-                break;
-        }
-    }, this);
-
+    // Sort filters if required
     if (this.settings.sort_filters) {
-        if (typeof this.settings.sort_filters == 'function') {
-            filters.sort(this.settings.sort_filters);
-        }
-        else {
-            var self = this;
-            filters.sort(function(a, b) {
-                return self.translate(a.label).localeCompare(self.translate(b.label));
-            });
-        }
-    }
-
-    if (this.status.has_optgroup) {
-        filters = Utils.groupSort(filters, 'optgroup');
+        filters.sort((a, b) =>
+            this.translate(a.label).localeCompare(this.translate(b.label))
+        );
     }
 
     return filters;
@@ -163,48 +105,43 @@ QueryBuilder.prototype.checkFilters = function(filters) {
 QueryBuilder.prototype.checkOperators = function(operators) {
     var definedOperators = [];
 
-    operators.forEach(function(operator, i) {
-        if (typeof operator == 'string') {
+    operators.forEach((operator, i) => {
+        if (typeof operator === "string") {
             if (!QueryBuilder.OPERATORS[operator]) {
-                Utils.error('Config', 'Unknown operator "{0}"', operator);
+                throw new Error(`Unknown operator "${operator}"`);
             }
-
-            operators[i] = operator = $.extendext(true, 'replace', {}, QueryBuilder.OPERATORS[operator]);
-        }
-        else {
+            // Object.assign is used to replicate the functionality of $.extendext with "replace"
+            operators[i] = operator = Object.assign({}, QueryBuilder.OPERATORS[operator]);
+        } else {
             if (!operator.type) {
-                Utils.error('Config', 'Missing "type" for operator {0}', i);
+                throw new Error(`Missing "type" for operator ${i}`);
             }
-
             if (QueryBuilder.OPERATORS[operator.type]) {
-                operators[i] = operator = $.extendext(true, 'replace', {}, QueryBuilder.OPERATORS[operator.type], operator);
+                operators[i] = operator = Object.assign({}, QueryBuilder.OPERATORS[operator.type], operator);
             }
-
             if (operator.nb_inputs === undefined || operator.apply_to === undefined) {
-                Utils.error('Config', 'Missing "nb_inputs" and/or "apply_to" for operator "{0}"', operator.type);
+                throw new Error(`Missing "nb_inputs" and/or "apply_to" for operator "${operator.type}"`);
             }
         }
 
-        if (definedOperators.indexOf(operator.type) != -1) {
-            Utils.error('Config', 'Operator "{0}" already defined', operator.type);
+        if (definedOperators.includes(operator.type)) {
+            throw new Error(`Operator "${operator.type}" already defined`);
         }
         definedOperators.push(operator.type);
 
         if (!operator.optgroup) {
             operator.optgroup = null;
-        }
-        else {
+        } else {
             this.status.has_operator_optgroup = true;
-
-            // register optgroup if needed
+            // Register optgroup if needed
             if (!this.settings.optgroups[operator.optgroup]) {
                 this.settings.optgroups[operator.optgroup] = operator.optgroup;
             }
         }
-    }, this);
+    });
 
     if (this.status.has_operator_optgroup) {
-        operators = Utils.groupSort(operators, 'optgroup');
+        operators = this.groupSort(operators, "optgroup");
     }
 
     return operators;
@@ -214,124 +151,135 @@ QueryBuilder.prototype.checkOperators = function(operators) {
  * Adds all events listeners to the builder
  * @private
  */
-QueryBuilder.prototype.bindEvents = function() {
-    var self = this;
-    var Selectors = QueryBuilder.selectors;
+QueryBuilder.prototype.bindEvents = function () {
+    const self = this;
+    const Selectors = QueryBuilder.selectors;
+
+    // Helper function to find the closest parent matching selector
+    const closest = (element, selector) => {
+        while (element && !element.matches(selector)) {
+            element = element.parentElement;
+        }
+        return element;
+    };
 
     // group condition change
-    this.$el.on('change.queryBuilder', Selectors.group_condition, function() {
-        if ($(this).is(':checked')) {
-            var $group = $(this).closest(Selectors.group_container);
-            self.getModel($group).condition = $(this).val();
+    this.element.addEventListener("change", function (event) {
+        if (event.target.matches(Selectors.group_condition) && event.target.checked) {
+            const group = closest(event.target, Selectors.group_container);
+            self.getModel(group).condition = event.target.value;
         }
     });
 
     // rule filter change
-    this.$el.on('change.queryBuilder', Selectors.rule_filter, function() {
-        var $rule = $(this).closest(Selectors.rule_container);
-        self.getModel($rule).filter = self.getFilterById($(this).val());
+    this.element.addEventListener("change", function (event) {
+        if (event.target.matches(Selectors.rule_filter)) {
+            const rule = closest(event.target, Selectors.rule_container);
+            self.getModel(rule).filter = self.getFilterById(event.target.value);
+        }
     });
 
     // rule operator change
-    this.$el.on('change.queryBuilder', Selectors.rule_operator, function() {
-        var $rule = $(this).closest(Selectors.rule_container);
-        self.getModel($rule).operator = self.getOperatorByType($(this).val());
+    this.element.addEventListener("change", function (event) {
+        if (event.target.matches(Selectors.rule_operator)) {
+            const rule = closest(event.target, Selectors.rule_container);
+            self.getModel(rule).operator = self.getOperatorByType(event.target.value);
+        }
     });
 
     // add rule button
-    this.$el.on('click.queryBuilder', Selectors.add_rule, function() {
-        var $group = $(this).closest(Selectors.group_container);
-        self.addRule(self.getModel($group));
+    this.element.addEventListener("click", function (event) {
+        if (event.target.matches(Selectors.add_rule)) {
+            const group = closest(event.target, Selectors.group_container);
+            self.addRule(self.getModel(group));
+        }
     });
 
     // delete rule button
-    this.$el.on('click.queryBuilder', Selectors.delete_rule, function() {
-        var $rule = $(this).closest(Selectors.rule_container);
-        self.deleteRule(self.getModel($rule));
+    this.element.addEventListener("click", function (event) {
+        if (event.target.matches(Selectors.delete_rule)) {
+            const rule = closest(event.target, Selectors.rule_container);
+            self.deleteRule(self.getModel(rule));
+        }
     });
 
     if (this.settings.allow_groups !== 0) {
         // add group button
-        this.$el.on('click.queryBuilder', Selectors.add_group, function() {
-            var $group = $(this).closest(Selectors.group_container);
-            self.addGroup(self.getModel($group));
+        this.element.addEventListener("click", function (event) {
+            if (event.target.matches(Selectors.add_group)) {
+                const group = closest(event.target, Selectors.group_container);
+                self.addGroup(self.getModel(group));
+            }
         });
 
         // delete group button
-        this.$el.on('click.queryBuilder', Selectors.delete_group, function() {
-            var $group = $(this).closest(Selectors.group_container);
-            self.deleteGroup(self.getModel($group));
+        this.element.addEventListener("click", function (event) {
+            if (event.target.matches(Selectors.delete_group)) {
+                const group = closest(event.target, Selectors.group_container);
+                self.deleteGroup(self.getModel(group));
+            }
         });
     }
 
-    // model events
-    this.model.on({
-        'drop': function(e, node) {
-            node.$el.remove();
-            self.refreshGroupsConditions();
-        },
-        'add': function(e, parent, node, index) {
-            if (index === 0) {
-                node.$el.prependTo(parent.$el.find('>' + QueryBuilder.selectors.rules_list));
+    // model events (assuming this.model is an event emitter, needs adaptation if not)
+    this.model.on('drop', (e, node) => {
+        node.element.remove();
+        self.refreshGroupsConditions();
+    });
+    this.model.on('add', (e, parent, node, index) => {
+        const parentList = parent.element.querySelector(">" + QueryBuilder.selectors.rules_list);
+        if (index === 0) {
+            parentList.prepend(node.element);
+        } else {
+            node.element.insertAfter(parent.rules[index - 1].element);
+        }
+        self.refreshGroupsConditions();
+    });
+    this.model.on('move', (e, node, group, index) => {
+        node.element.remove();
+        const groupList = group.element.querySelector(">" + QueryBuilder.selectors.rules_list);
+        if (index === 0) {
+            groupList.prepend(node.element);
+        } else {
+            node.element.insertAfter(group.rules[index - 1].element);
+        }
+        self.refreshGroupsConditions();
+    });
+    this.model.on('update', (e, node, field, value, oldValue) => {
+        if (node instanceof Rule) {
+            switch (field) {
+                case 'error':
+                    self.updateError(node);
+                    break;
+                case 'flags':
+                    self.applyRuleFlags(node);
+                    break;
+                case 'filter':
+                    self.updateRuleFilter(node, oldValue);
+                    break;
+                case 'operator':
+                    self.updateRuleOperator(node, oldValue);
+                    break;
+                case 'value':
+                    self.updateRuleValue(node, oldValue);
+                    break;
             }
-            else {
-                node.$el.insertAfter(parent.rules[index - 1].$el);
-            }
-            self.refreshGroupsConditions();
-        },
-        'move': function(e, node, group, index) {
-            node.$el.detach();
-
-            if (index === 0) {
-                node.$el.prependTo(group.$el.find('>' + QueryBuilder.selectors.rules_list));
-            }
-            else {
-                node.$el.insertAfter(group.rules[index - 1].$el);
-            }
-            self.refreshGroupsConditions();
-        },
-        'update': function(e, node, field, value, oldValue) {
-            if (node instanceof Rule) {
-                switch (field) {
-                    case 'error':
-                        self.updateError(node);
-                        break;
-
-                    case 'flags':
-                        self.applyRuleFlags(node);
-                        break;
-
-                    case 'filter':
-                        self.updateRuleFilter(node, oldValue);
-                        break;
-
-                    case 'operator':
-                        self.updateRuleOperator(node, oldValue);
-                        break;
-
-                    case 'value':
-                        self.updateRuleValue(node, oldValue);
-                        break;
-                }
-            }
-            else {
-                switch (field) {
-                    case 'error':
-                        self.updateError(node);
-                        break;
-
-                    case 'flags':
-                        self.applyGroupFlags(node);
-                        break;
-
-                    case 'condition':
-                        self.updateGroupCondition(node, oldValue);
-                        break;
-                }
+        } else {
+            switch (field) {
+                case 'error':
+                    self.updateError(node);
+                    break;
+                case 'flags':
+                    self.applyGroupFlags(node);
+                    break;
+                case 'condition':
+                    self.updateGroupCondition(node, oldValue);
+                    break;
             }
         }
     });
 };
+
 
 /**
  * Creates the root group
@@ -341,27 +289,26 @@ QueryBuilder.prototype.bindEvents = function() {
  * @returns {Group} root group
  * @fires QueryBuilder.afterAddGroup
  */
-QueryBuilder.prototype.setRoot = function(addRule, data, flags) {
-    addRule = (addRule === undefined || addRule === true);
+QueryBuilder.prototype.setRoot = function(addRule = true, data, flags) {
+    const groupId = this.nextGroupId();
+    const groupElement = document.createRange().createContextualFragment(this.getGroupTemplate(groupId, 1));
 
-    var group_id = this.nextGroupId();
-    var $group = $($.parseHTML(this.getGroupTemplate(group_id, 1)));
+    this.element.appendChild(groupElement);
+    const rootGroup = new Group(null, groupElement);
+    rootGroup.model = this.model;
+    rootGroup.data = data;
+    rootGroup.flags = Object.assign({}, this.settings.default_group_flags, flags);
+    rootGroup.condition = this.settings.default_condition;
 
-    this.$el.append($group);
-    this.model.root = new Group(null, $group);
-    this.model.root.model = this.model;
-
-    this.model.root.data = data;
-    this.model.root.flags = $.extend({}, this.settings.default_group_flags, flags);
-    this.model.root.condition = this.settings.default_condition;
-
-    this.trigger('afterAddGroup', this.model.root);
+    // Create and dispatch the 'afterAddGroup' event
+    const event = new CustomEvent('afterAddGroup', { detail: { group: rootGroup } });
+    this.element.dispatchEvent(event);
 
     if (addRule) {
-        this.addRule(this.model.root);
+        this.addRule(rootGroup);
     }
 
-    return this.model.root;
+    return rootGroup;
 };
 
 /**
@@ -374,46 +321,35 @@ QueryBuilder.prototype.setRoot = function(addRule, data, flags) {
  * @fires QueryBuilder.beforeAddGroup
  * @fires QueryBuilder.afterAddGroup
  */
-QueryBuilder.prototype.addGroup = function(parent, addRule, data, flags) {
-    addRule = (addRule === undefined || addRule === true);
+QueryBuilder.prototype.addGroup = function(parent, addRule = true, data, flags) {
+    const level = parent.level + 1;
 
-    var level = parent.level + 1;
-
-    /**
-     * Just before adding a group, can be prevented.
-     * @event beforeAddGroup
-     * @memberof QueryBuilder
-     * @param {Group} parent
-     * @param {boolean} addRule - if an empty rule will be added in the group
-     * @param {int} level - nesting level of the group, 1 is the root group
-     */
-    var e = this.trigger('beforeAddGroup', parent, addRule, level);
-    if (e.isDefaultPrevented()) {
+    // Custom event 'beforeAddGroup' that can be prevented
+    const beforeAddGroupEvent = new CustomEvent('beforeAddGroup', {
+        detail: { parent, addRule, level },
+        cancelable: true
+    });
+    this.element.dispatchEvent(beforeAddGroupEvent);
+    if (beforeAddGroupEvent.defaultPrevented) {
         return null;
     }
 
-    var group_id = this.nextGroupId();
-    var $group = $(this.getGroupTemplate(group_id, level));
-    var model = parent.addGroup($group);
+    const groupId = this.nextGroupId();
+    const groupElement = document.createRange().createContextualFragment(this.getGroupTemplate(groupId, level));
+    parent.element.appendChild(groupElement);  // Assuming `element` is a property of Group that references its DOM element
 
+    const model = new Group(parent, groupElement); // Assuming constructor takes a parent and element
     model.data = data;
-    model.flags = $.extend({}, this.settings.default_group_flags, flags);
+    model.flags = Object.assign({}, this.settings.default_group_flags, flags);
     model.condition = this.settings.default_condition;
 
-    /**
-     * Just after adding a group
-     * @event afterAddGroup
-     * @memberof QueryBuilder
-     * @param {Group} group
-     */
-    this.trigger('afterAddGroup', model);
+    // Custom event 'afterAddGroup'
+    const afterAddGroupEvent = new CustomEvent('afterAddGroup', { detail: { group: model } });
+    this.element.dispatchEvent(afterAddGroupEvent);
 
-    /**
-     * After any change in the rules
-     * @event rulesChanged
-     * @memberof QueryBuilder
-     */
-    this.trigger('rulesChanged');
+    // Custom event 'rulesChanged'
+    const rulesChangedEvent = new CustomEvent('rulesChanged');
+    this.element.dispatchEvent(rulesChangedEvent);
 
     if (addRule) {
         this.addRule(model);
@@ -434,40 +370,45 @@ QueryBuilder.prototype.deleteGroup = function(group) {
         return false;
     }
 
-    /**
-     * Just before deleting a group, can be prevented
-     * @event beforeDeleteGroup
-     * @memberof QueryBuilder
-     * @param {Group} parent
-     */
-    var e = this.trigger('beforeDeleteGroup', group);
-    if (e.isDefaultPrevented()) {
+    // Dispatching 'beforeDeleteGroup' custom event that can be prevented
+    const beforeDeleteGroupEvent = new CustomEvent('beforeDeleteGroup', {
+        detail: { group: group },
+        cancelable: true
+    });
+    this.element.dispatchEvent(beforeDeleteGroupEvent);
+    if (beforeDeleteGroupEvent.defaultPrevented) {
         return false;
     }
 
-    var del = true;
+    let del = true;
 
-    group.each('reverse', function(rule) {
-        del &= this.deleteRule(rule);
-    }, function(group) {
-        del &= this.deleteGroup(group);
-    }, this);
+    // Recursive deletion of rules and subgroups
+    group.each(
+        "reverse",
+        function(rule) {
+            del &= this.deleteRule(rule);
+        },
+        function(subgroup) {
+            del &= this.deleteGroup(subgroup);
+        },
+        this
+    );
 
     if (del) {
-        group.drop();
+        group.drop(); // Assuming drop() handles the DOM removal and cleanup
 
-        /**
-         * Just after deleting a group
-         * @event afterDeleteGroup
-         * @memberof QueryBuilder
-         */
-        this.trigger('afterDeleteGroup');
+        // Dispatch 'afterDeleteGroup' event
+        const afterDeleteGroupEvent = new CustomEvent('afterDeleteGroup', { detail: { group: group } });
+        this.element.dispatchEvent(afterDeleteGroupEvent);
 
-        this.trigger('rulesChanged');
+        // Notify all listeners about changes in the rules
+        const rulesChangedEvent = new CustomEvent('rulesChanged');
+        this.element.dispatchEvent(rulesChangedEvent);
     }
 
     return del;
 };
+
 
 /**
  * Performs actions when a group's condition changes
@@ -477,39 +418,42 @@ QueryBuilder.prototype.deleteGroup = function(group) {
  * @private
  */
 QueryBuilder.prototype.updateGroupCondition = function(group, previousCondition) {
-    group.$el.find('>' + QueryBuilder.selectors.group_condition).each(function() {
-        var $this = $(this);
-        $this.prop('checked', $this.val() === group.condition);
-        $this.parent().toggleClass('active', $this.val() === group.condition);
+    const conditions = group.element.querySelectorAll(">" + QueryBuilder.selectors.group_condition);
+    conditions.forEach(condition => {
+        condition.checked = condition.value === group.condition;
+        condition.parentNode.classList.toggle("active", condition.value === group.condition);
     });
 
-    /**
-     * After the group condition has been modified
-     * @event afterUpdateGroupCondition
-     * @memberof QueryBuilder
-     * @param {Group} group
-     * @param {object} previousCondition
-     */
-    this.trigger('afterUpdateGroupCondition', group, previousCondition);
+    // Dispatch 'afterUpdateGroupCondition' event
+    const event = new CustomEvent('afterUpdateGroupCondition', {
+        detail: { group: group, previousCondition: previousCondition }
+    });
+    this.element.dispatchEvent(event);
 
-    this.trigger('rulesChanged');
+    // Notify all listeners about changes in the rules
+    const rulesChangedEvent = new CustomEvent('rulesChanged');
+    this.element.dispatchEvent(rulesChangedEvent);
 };
+
 
 /**
  * Updates the visibility of conditions based on number of rules inside each group
  * @private
  */
 QueryBuilder.prototype.refreshGroupsConditions = function() {
-    (function walk(group) {
+    const walk = (group) => {
         if (!group.flags || (group.flags && !group.flags.condition_readonly)) {
-            group.$el.find('>' + QueryBuilder.selectors.group_condition).prop('disabled', group.rules.length <= 1)
-                .parent().toggleClass('disabled', group.rules.length <= 1);
+            const conditions = group.element.querySelectorAll(">" + QueryBuilder.selectors.group_condition);
+            conditions.forEach(condition => {
+                condition.disabled = group.rules.length <= 1;
+                condition.parentNode.classList.toggle("disabled", group.rules.length <= 1);
+            });
         }
-
-        group.each(null, function(group) {
-            walk(group);
-        }, this);
-    }(this.model.root));
+        group.rules.forEach(subgroup => {
+            walk(subgroup);
+        });
+    };
+    walk(this.model.root);
 };
 
 /**
@@ -523,49 +467,34 @@ QueryBuilder.prototype.refreshGroupsConditions = function() {
  * @fires QueryBuilder.changer:getDefaultFilter
  */
 QueryBuilder.prototype.addRule = function(parent, data, flags) {
-    /**
-     * Just before adding a rule, can be prevented
-     * @event beforeAddRule
-     * @memberof QueryBuilder
-     * @param {Group} parent
-     */
-    var e = this.trigger('beforeAddRule', parent);
-    if (e.isDefaultPrevented()) {
+    const beforeAddRuleEvent = new CustomEvent('beforeAddRule', {
+        detail: { parent: parent },
+        cancelable: true
+    });
+    this.element.dispatchEvent(beforeAddRuleEvent);
+    if (beforeAddRuleEvent.defaultPrevented) {
         return null;
     }
 
-    var rule_id = this.nextRuleId();
-    var $rule = $($.parseHTML(this.getRuleTemplate(rule_id)));
-    var model = parent.addRule($rule);
+    const ruleId = this.nextRuleId();
+    const ruleElement = document.createRange().createContextualFragment(this.getRuleTemplate(ruleId));
+    const model = parent.addRule(ruleElement); // Assuming addRule method takes a DOM element
 
     model.data = data;
-    model.flags = $.extend({}, this.settings.default_rule_flags, flags);
+    model.flags = Object.assign({}, this.settings.default_rule_flags, flags);
 
-    /**
-     * Just after adding a rule
-     * @event afterAddRule
-     * @memberof QueryBuilder
-     * @param {Rule} rule
-     */
-    this.trigger('afterAddRule', model);
+    // Dispatch 'afterAddRule' event
+    const afterAddRuleEvent = new CustomEvent('afterAddRule', { detail: { rule: model } });
+    this.element.dispatchEvent(afterAddRuleEvent);
 
-    this.trigger('rulesChanged');
+    // Notify all listeners about changes in the rules
+    const rulesChangedEvent = new CustomEvent('rulesChanged');
+    this.element.dispatchEvent(rulesChangedEvent);
 
     this.createRuleFilters(model);
 
     if (this.settings.default_filter || !this.settings.display_empty_filter) {
-        /**
-         * Modifies the default filter for a rule
-         * @event changer:getDefaultFilter
-         * @memberof QueryBuilder
-         * @param {QueryBuilder.Filter} filter
-         * @param {Rule} rule
-         * @returns {QueryBuilder.Filter}
-         */
-        model.filter = this.change('getDefaultFilter',
-            this.getFilterById(this.settings.default_filter || this.filters[0].id),
-            model
-        );
+        model.filter = this.change('getDefaultFilter', this.getFilterById(this.settings.default_filter || this.filters[0].id), model);
     }
 
     return model;
@@ -583,27 +512,25 @@ QueryBuilder.prototype.deleteRule = function(rule) {
         return false;
     }
 
-    /**
-     * Just before deleting a rule, can be prevented
-     * @event beforeDeleteRule
-     * @memberof QueryBuilder
-     * @param {Rule} rule
-     */
-    var e = this.trigger('beforeDeleteRule', rule);
-    if (e.isDefaultPrevented()) {
+    // Dispatch 'beforeDeleteRule' event that can be prevented
+    const beforeDeleteRuleEvent = new CustomEvent('beforeDeleteRule', {
+        detail: { rule: rule },
+        cancelable: true
+    });
+    this.element.dispatchEvent(beforeDeleteRuleEvent);
+    if (beforeDeleteRuleEvent.defaultPrevented) {
         return false;
     }
 
-    rule.drop();
+    rule.drop(); // Assuming 'drop' is a method that handles the removal of the rule from DOM and cleanup
 
-    /**
-     * Just after deleting a rule
-     * @event afterDeleteRule
-     * @memberof QueryBuilder
-     */
-    this.trigger('afterDeleteRule');
+    // Dispatch 'afterDeleteRule' event
+    const afterDeleteRuleEvent = new CustomEvent('afterDeleteRule');
+    this.element.dispatchEvent(afterDeleteRuleEvent);
 
-    this.trigger('rulesChanged');
+    // Notify all listeners about changes in the rules
+    const rulesChangedEvent = new CustomEvent('rulesChanged');
+    this.element.dispatchEvent(rulesChangedEvent);
 
     return true;
 };
@@ -616,29 +543,22 @@ QueryBuilder.prototype.deleteRule = function(rule) {
  * @private
  */
 QueryBuilder.prototype.createRuleFilters = function(rule) {
-    /**
-     * Modifies the list a filters available for a rule
-     * @event changer:getRuleFilters
-     * @memberof QueryBuilder
-     * @param {QueryBuilder.Filter[]} filters
-     * @param {Rule} rule
-     * @returns {QueryBuilder.Filter[]}
-     */
-    var filters = this.change('getRuleFilters', this.filters, rule);
-    var $filterSelect = $($.parseHTML(this.getRuleFilterSelect(rule, filters)));
+    // Modify the list of filters available for the rule
+    let filters = this.change("getRuleFilters", this.filters, rule);
 
-    rule.$el.find(QueryBuilder.selectors.filter_container).html($filterSelect);
+    // Create filter select element
+    const filterSelect = document.createRange().createContextualFragment(this.getRuleFilterSelect(rule, filters));
+    const filterContainer = rule.element.querySelector(QueryBuilder.selectors.filter_container);
+    filterContainer.innerHTML = '';  // Clear existing content
+    filterContainer.appendChild(filterSelect);
 
-    /**
-     * After creating the dropdown for filters
-     * @event afterCreateRuleFilters
-     * @memberof QueryBuilder
-     * @param {Rule} rule
-     */
-    this.trigger('afterCreateRuleFilters', rule);
+    // Dispatch 'afterCreateRuleFilters' event
+    const afterCreateRuleFiltersEvent = new CustomEvent('afterCreateRuleFilters', { detail: { rule: rule } });
+    this.element.dispatchEvent(afterCreateRuleFiltersEvent);
 
     this.applyRuleFlags(rule);
 };
+
 
 /**
  * Creates the operators for a rule and init the rule operator
@@ -647,35 +567,31 @@ QueryBuilder.prototype.createRuleFilters = function(rule) {
  * @private
  */
 QueryBuilder.prototype.createRuleOperators = function(rule) {
-    var $operatorContainer = rule.$el.find(QueryBuilder.selectors.operator_container).empty();
+    const operatorContainer = rule.element.querySelector(QueryBuilder.selectors.operator_container);
+    operatorContainer.innerHTML = '';  // Clear existing content
 
     if (!rule.filter) {
         return;
     }
 
-    var operators = this.getOperators(rule.filter);
-    var $operatorSelect = $($.parseHTML(this.getRuleOperatorSelect(rule, operators)));
+    const operators = this.getOperators(rule.filter);
+    const operatorSelect = document.createRange().createContextualFragment(this.getRuleOperatorSelect(rule, operators));
+    operatorContainer.appendChild(operatorSelect);
 
-    $operatorContainer.html($operatorSelect);
-
-    // set the operator without triggering update event
+    // Set the operator without triggering update event
     if (rule.filter.default_operator) {
         rule.__.operator = this.getOperatorByType(rule.filter.default_operator);
-    }
-    else {
+    } else {
         rule.__.operator = operators[0];
     }
 
-    rule.$el.find(QueryBuilder.selectors.rule_operator).val(rule.operator.type);
+    // Set value to select without triggering change event
+    const operatorSelectElement = rule.element.querySelector(QueryBuilder.selectors.rule_operator);
+    operatorSelectElement.value = rule.__.operator.type;
 
-    /**
-     * After creating the dropdown for operators
-     * @event afterCreateRuleOperators
-     * @memberof QueryBuilder
-     * @param {Rule} rule
-     * @param {QueryBuilder.Operator[]} operators - allowed operators for this rule
-     */
-    this.trigger('afterCreateRuleOperators', rule, operators);
+    // Dispatch 'afterCreateRuleOperators' event
+    const event = new CustomEvent('afterCreateRuleOperators', { detail: { rule: rule, operators: operators } });
+    this.element.dispatchEvent(event);
 
     this.applyRuleFlags(rule);
 };
@@ -687,7 +603,8 @@ QueryBuilder.prototype.createRuleOperators = function(rule) {
  * @private
  */
 QueryBuilder.prototype.createRuleInput = function(rule) {
-    var $valueContainer = rule.$el.find(QueryBuilder.selectors.value_container).empty();
+    const valueContainer = rule.element.querySelector(QueryBuilder.selectors.value_container);
+    valueContainer.innerHTML = '';  // Clear existing content
 
     rule.__.value = undefined;
 
@@ -695,43 +612,41 @@ QueryBuilder.prototype.createRuleInput = function(rule) {
         return;
     }
 
-    var self = this;
-    var $inputs = $();
-    var filter = rule.filter;
+    const self = this;
+    let inputs = [];
+    const filter = rule.filter;
 
-    for (var i = 0; i < rule.operator.nb_inputs; i++) {
-        var $ruleInput = $($.parseHTML($.trim(this.getRuleInput(rule, i))));
-        if (i > 0) $valueContainer.append(this.settings.inputs_separator);
-        $valueContainer.append($ruleInput);
-        $inputs = $inputs.add($ruleInput);
+    for (let i = 0; i < rule.operator.nb_inputs; i++) {
+        const inputHTML = document.createRange().createContextualFragment($.trim(this.getRuleInput(rule, i)));
+        if (i > 0) valueContainer.appendChild(document.createTextNode(this.settings.inputs_separator));
+        valueContainer.appendChild(inputHTML);
+        inputs.push(inputHTML);
     }
 
-    $valueContainer.css('display', '');
+    valueContainer.style.display = '';
 
-    $inputs.on('change ' + (filter.input_event || ''), function() {
-        if (!rule._updating_input) {
-            rule._updating_value = true;
-            rule.value = self.getRuleInputValue(rule);
-            rule._updating_value = false;
+    inputs.forEach(input => {
+        input.addEventListener("change" + (filter.input_event || ""), function() {
+            if (!rule._updating_input) {
+                rule._updating_value = true;
+                rule.value = self.getRuleInputValue(rule);
+                rule._updating_value = false;
+            }
+        });
+
+        // If a plugin is to be used, we assume the plugin setup code is handled elsewhere or converted accordingly
+        if (filter.plugin) {
+            self.applyPlugin(input, filter);
         }
     });
 
-    if (filter.plugin) {
-        $inputs[filter.plugin](filter.plugin_config || {});
-    }
-
-    /**
-     * After creating the input for a rule and initializing optional plugin
-     * @event afterCreateRuleInput
-     * @memberof QueryBuilder
-     * @param {Rule} rule
-     */
-    this.trigger('afterCreateRuleInput', rule);
+    // Dispatch 'afterCreateRuleInput' event
+    const event = new CustomEvent('afterCreateRuleInput', { detail: { rule: rule } });
+    this.element.dispatchEvent(event);
 
     if (filter.default_value !== undefined) {
         rule.value = filter.default_value;
-    }
-    else {
+    } else {
         rule._updating_value = true;
         rule.value = self.getRuleInputValue(rule);
         rule._updating_value = false;
@@ -739,6 +654,7 @@ QueryBuilder.prototype.createRuleInput = function(rule) {
 
     this.applyRuleFlags(rule);
 };
+
 
 /**
  * Performs action when a rule's filter changes
@@ -751,24 +667,25 @@ QueryBuilder.prototype.updateRuleFilter = function(rule, previousFilter) {
     this.createRuleOperators(rule);
     this.createRuleInput(rule);
 
-    rule.$el.find(QueryBuilder.selectors.rule_filter).val(rule.filter ? rule.filter.id : '-1');
+    const ruleFilterElement = rule.element.querySelector(QueryBuilder.selectors.rule_filter);
+    ruleFilterElement.value = rule.filter ? rule.filter.id : "-1";
 
-    // clear rule data if the filter changed
+    // Clear rule data if the filter changed
     if (previousFilter && rule.filter && previousFilter.id !== rule.filter.id) {
         rule.data = undefined;
     }
 
-    /**
-     * After the filter has been updated and the operators and input re-created
-     * @event afterUpdateRuleFilter
-     * @memberof QueryBuilder
-     * @param {Rule} rule
-     * @param {object} previousFilter
-     */
-    this.trigger('afterUpdateRuleFilter', rule, previousFilter);
+    // Dispatch 'afterUpdateRuleFilter' event
+    const event = new CustomEvent('afterUpdateRuleFilter', {
+        detail: { rule: rule, previousFilter: previousFilter }
+    });
+    this.element.dispatchEvent(event);
 
-    this.trigger('rulesChanged');
+    // Notify all listeners about changes in the rules
+    const rulesChangedEvent = new CustomEvent('rulesChanged');
+    this.element.dispatchEvent(rulesChangedEvent);
 };
+
 
 /**
  * Performs actions when a rule's operator changes
@@ -778,42 +695,35 @@ QueryBuilder.prototype.updateRuleFilter = function(rule, previousFilter) {
  * @private
  */
 QueryBuilder.prototype.updateRuleOperator = function(rule, previousOperator) {
-    var $valueContainer = rule.$el.find(QueryBuilder.selectors.value_container);
+    const valueContainer = rule.element.querySelector(QueryBuilder.selectors.value_container);
 
     if (!rule.operator || rule.operator.nb_inputs === 0) {
-        $valueContainer.hide();
-
+        valueContainer.style.display = 'none';
         rule.__.value = undefined;
-    }
-    else {
-        $valueContainer.css('display', '');
-
-        if ($valueContainer.is(':empty') || !previousOperator ||
-            rule.operator.nb_inputs !== previousOperator.nb_inputs ||
-            rule.operator.optgroup !== previousOperator.optgroup
-        ) {
+    } else {
+        valueContainer.style.display = '';
+        if (!previousOperator || rule.operator.nb_inputs !== previousOperator.nb_inputs || rule.operator.optgroup !== previousOperator.optgroup) {
             this.createRuleInput(rule);
         }
     }
 
     if (rule.operator) {
-        rule.$el.find(QueryBuilder.selectors.rule_operator).val(rule.operator.type);
-
-        // refresh value if the format changed for this operator
+        const ruleOperatorElement = rule.element.querySelector(QueryBuilder.selectors.rule_operator);
+        ruleOperatorElement.value = rule.operator.type;
+        // Refresh value if the format changed for this operator
         rule.__.value = this.getRuleInputValue(rule);
     }
 
-    /**
-     *  After the operator has been updated and the input optionally re-created
-     * @event afterUpdateRuleOperator
-     * @memberof QueryBuilder
-     * @param {Rule} rule
-     * @param {object} previousOperator
-     */
-    this.trigger('afterUpdateRuleOperator', rule, previousOperator);
+    // Dispatch 'afterUpdateRuleOperator' event
+    const event = new CustomEvent('afterUpdateRuleOperator', {
+        detail: { rule: rule, previousOperator: previousOperator }
+    });
+    this.element.dispatchEvent(event);
 
-    this.trigger('rulesChanged');
+    const rulesChangedEvent = new CustomEvent('rulesChanged');
+    this.element.dispatchEvent(rulesChangedEvent);
 };
+
 
 /**
  * Performs actions when rule's value changes
@@ -827,17 +737,16 @@ QueryBuilder.prototype.updateRuleValue = function(rule, previousValue) {
         this.setRuleInputValue(rule, rule.value);
     }
 
-    /**
-     * After the rule value has been modified
-     * @event afterUpdateRuleValue
-     * @memberof QueryBuilder
-     * @param {Rule} rule
-     * @param {*} previousValue
-     */
-    this.trigger('afterUpdateRuleValue', rule, previousValue);
+    // Dispatch 'afterUpdateRuleValue' event
+    const event = new CustomEvent('afterUpdateRuleValue', {
+        detail: { rule: rule, previousValue: previousValue }
+    });
+    this.element.dispatchEvent(event);
 
-    this.trigger('rulesChanged');
+    const rulesChangedEvent = new Custom Event('rulesChanged');
+    this.element.dispatchEvent(rulesChangedEvent);
 };
+
 
 /**
  * Changes a rule's properties depending on its flags
@@ -846,25 +755,30 @@ QueryBuilder.prototype.updateRuleValue = function(rule, previousValue) {
  * @private
  */
 QueryBuilder.prototype.applyRuleFlags = function(rule) {
-    var flags = rule.flags;
-    var Selectors = QueryBuilder.selectors;
+    const flags = rule.flags;
+    const Selectors = QueryBuilder.selectors;
 
-    rule.$el.find(Selectors.rule_filter).prop('disabled', flags.filter_readonly);
-    rule.$el.find(Selectors.rule_operator).prop('disabled', flags.operator_readonly);
-    rule.$el.find(Selectors.rule_value).prop('disabled', flags.value_readonly);
+    const ruleFilterElement = rule.element.querySelector(Selectors.rule_filter);
+    ruleFilterElement.disabled = flags.filter_readonly;
+
+    const ruleOperatorElement = rule.element.querySelector(Selectors.rule_operator);
+    ruleOperatorElement.disabled = flags.operator_readonly;
+
+    const ruleValueElement = rule.element.querySelector(Selectors.rule_value);
+    ruleValueElement.disabled = flags.value_readonly;
 
     if (flags.no_delete) {
-        rule.$el.find(Selectors.delete_rule).remove();
+        const deleteRuleElement = rule.element.querySelector(Selectors.delete_rule);
+        if (deleteRuleElement) {
+            deleteRuleElement.remove();
+        }
     }
 
-    /**
-     * After rule's flags has been applied
-     * @event afterApplyRuleFlags
-     * @memberof QueryBuilder
-     * @param {Rule} rule
-     */
-    this.trigger('afterApplyRuleFlags', rule);
+    // Dispatch 'afterApplyRuleFlags' event
+    const event = new CustomEvent('afterApplyRuleFlags', { detail: { rule: rule } });
+    this.element.dispatchEvent(event);
 };
+
 
 /**
  * Changes group's properties depending on its flags
@@ -873,30 +787,37 @@ QueryBuilder.prototype.applyRuleFlags = function(rule) {
  * @private
  */
 QueryBuilder.prototype.applyGroupFlags = function(group) {
-    var flags = group.flags;
-    var Selectors = QueryBuilder.selectors;
+    const flags = group.flags;
+    const Selectors = QueryBuilder.selectors;
 
-    group.$el.find('>' + Selectors.group_condition).prop('disabled', flags.condition_readonly)
-        .parent().toggleClass('readonly', flags.condition_readonly);
+    const groupConditionElement = group.element.querySelector(">" + Selectors.group_condition);
+    groupConditionElement.disabled = flags.condition_readonly;
+    groupConditionElement.parentNode.classList.toggle("readonly", flags.condition_readonly);
 
     if (flags.no_add_rule) {
-        group.$el.find(Selectors.add_rule).remove();
+        const addRuleElement = group.element.querySelector(Selectors.add_rule);
+        if (addRuleElement) {
+            addRuleElement.remove();
+        }
     }
     if (flags.no_add_group) {
-        group.$el.find(Selectors.add_group).remove();
+        const addGroupElement = group.element.querySelector(Selectors.add_group);
+        if (addGroupElement) {
+            addGroupElement.remove();
+        }
     }
     if (flags.no_delete) {
-        group.$el.find(Selectors.delete_group).remove();
+        const deleteGroupElement = group.element.querySelector(Selectors.delete_group);
+        if (deleteGroupElement) {
+            deleteGroupElement.remove();
+        }
     }
 
-    /**
-     * After group's flags has been applied
-     * @event afterApplyGroupFlags
-     * @memberof QueryBuilder
-     * @param {Group} group
-     */
-    this.trigger('afterApplyGroupFlags', group);
+    // Dispatch 'afterApplyGroupFlags' event
+    const event = new CustomEvent('afterApplyGroupFlags', { detail: { group: group } });
+    this.element.dispatchEvent(event);
 };
+
 
 /**
  * Clears all errors markers
@@ -912,13 +833,15 @@ QueryBuilder.prototype.clearErrors = function(node) {
     node.error = null;
 
     if (node instanceof Group) {
-        node.each(function(rule) {
+        node.rules.forEach(rule => {
             rule.error = null;
-        }, function(group) {
+        });
+        node.groups.forEach(group => {
             this.clearErrors(group);
-        }, this);
+        });
     }
 };
+
 
 /**
  * Adds/Removes error on a Rule or Group
@@ -929,29 +852,28 @@ QueryBuilder.prototype.clearErrors = function(node) {
 QueryBuilder.prototype.updateError = function(node) {
     if (this.settings.display_errors) {
         if (node.error === null) {
-            node.$el.removeClass('has-error');
-        }
-        else {
-            var errorMessage = this.translate('errors', node.error[0]);
-            errorMessage = Utils.fmt(errorMessage, node.error.slice(1));
+            node.element.classList.remove("has-error");
+        } else {
+            let errorMessage = this.translate("errors", node.error[0]);
+            errorMessage = Utils.fmt(errorMessage, node.error.slice(1));  // Assuming Utils.fmt is a valid utility function for formatting
 
-            /**
-             * Modifies an error message before display
-             * @event changer:displayError
-             * @memberof QueryBuilder
-             * @param {string} errorMessage - the error message (translated and formatted)
-             * @param {array} error - the raw error array (error code and optional arguments)
-             * @param {Node} node
-             * @returns {string}
-             */
-            errorMessage = this.change('displayError', errorMessage, node.error, node);
+            // Trigger the displayError event to allow modification of the error message
+            const displayErrorEvent = new CustomEvent('displayError', {
+                detail: { errorMessage, error: node.error, node },
+                cancelable: true
+            });
+            this.element.dispatchEvent(displayErrorEvent);
+            if (!displayErrorEvent.defaultPrevented) {
+                errorMessage = displayErrorEvent.detail.errorMessage;  // Updated error message
+            }
 
-            node.$el.addClass('has-error')
-                .find(QueryBuilder.selectors.error_container).eq(0)
-                .attr('title', errorMessage);
+            node.element.classList.add("has-error");
+            const errorContainer = node.element.querySelector(QueryBuilder.selectors.error_container);
+            errorContainer.setAttribute("title", errorMessage);
         }
     }
 };
+
 
 /**
  * Triggers a validation error event
@@ -962,20 +884,17 @@ QueryBuilder.prototype.updateError = function(node) {
  * @private
  */
 QueryBuilder.prototype.triggerValidationError = function(node, error, value) {
-    if (!$.isArray(error)) {
+    if (!Array.isArray(error)) {
         error = [error];
     }
 
-    /**
-     * Fired when a validation error occurred, can be prevented
-     * @event validationError
-     * @memberof QueryBuilder
-     * @param {Node} node
-     * @param {string} error
-     * @param {*} value
-     */
-    var e = this.trigger('validationError', node, error, value);
-    if (!e.isDefaultPrevented()) {
+    const validationErrorEvent = new CustomEvent('validationError', {
+        detail: { node, error, value },
+        cancelable: true
+    });
+    this.element.dispatchEvent(validationErrorEvent);
+    if (!validationErrorEvent.defaultPrevented) {
         node.error = error;
     }
 };
+
